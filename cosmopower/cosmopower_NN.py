@@ -6,7 +6,8 @@ import tensorflow as tf
 import pickle
 from tqdm import trange
 dtype = tf.float32
-
+tf.config.threading.set_intra_op_parallelism_threads(8)
+tf.config.threading.set_inter_op_parallelism_threads(8)
 
 # =================================
 #               NN
@@ -590,30 +591,32 @@ class cosmopower_NN(tf.keras.Model):
         # casting
         training_parameters = tf.convert_to_tensor(training_parameters, dtype=dtype)
         training_features = tf.convert_to_tensor(training_features, dtype=dtype)
+        
+        #training_selection = tf.random.shuffle([True] * n_training + [False] * n_validation, seed=42) #was inside the loop
+        anything = []
 
         # train using cooling/heating schedule for lr/batch-size
         for i in range(len(learning_rates)):
 
-            print('learning rate = ' + str(learning_rates[i]) + ', batch size = ' + str(batch_sizes[i]))
+            print('learning rate lessgo= ' + str(learning_rates[i]) + ', batch size = ' + str(batch_sizes[i]))
 
             # set learning rate
             self.optimizer.lr = learning_rates[i]
-
-            # split into validation and training sub-sets
-            training_selection = tf.random.shuffle([True] * n_training + [False] * n_validation)
-
+            training_selection = tf.random.shuffle([True] * n_training + [False] * n_validation, seed=42) #was inside the loop
+            anything.append(training_selection)
             # create iterable dataset (given batch size)
             training_data = tf.data.Dataset.from_tensor_slices((training_parameters[training_selection], training_features[training_selection])).shuffle(n_training).batch(batch_sizes[i])
-
+            
             # set up training loss
             training_loss = [np.infty]
-            validation_loss = [np.infty]
+            validation_loss = [np.infty] 
             best_loss = np.infty
             early_stopping_counter = 0
 
             # loop over epochs
             with trange(max_epochs[i]) as t:
                 for epoch in t:
+                    # print(f"Currently on epoch {epoch+1} of {max_epochs[i]}") 
                     # loop over batches
                     for theta, feats in training_data:
 
@@ -623,8 +626,10 @@ class cosmopower_NN(tf.keras.Model):
                         else:
                             loss = self.training_step_with_accumulated_gradients(theta, feats, accumulation_steps=gradient_accumulation_steps[i])
 
-                    # compute validation loss at the end of the epoch
+
+                    training_loss.append(self.compute_loss(training_parameters[training_selection], training_features[training_selection]).numpy())
                     validation_loss.append(self.compute_loss(training_parameters[~training_selection], training_features[~training_selection]).numpy())
+
 
                     # update the progressbar
                     t.set_postfix(loss=validation_loss[-1])
@@ -638,10 +643,12 @@ class cosmopower_NN(tf.keras.Model):
                     if early_stopping_counter >= patience_values[i]:
                         self.update_emulator_parameters()
                         self.save(filename_saved_model)
-                        print('Validation loss = ' + str(best_loss))
-                        print('Model saved.')
+                        print('Validation loss :O = ' + str(best_loss))
+                        print('Model saved. boop :D')
                         break
                 self.update_emulator_parameters()
                 self.save(filename_saved_model)
-                print('Reached max number of epochs. Validation loss = ' + str(best_loss))
-                print('Model saved.')
+                print('Reached max number of epochs. Validation loss (min) :p = ' + str(best_loss))
+                print('Model saved :) ')
+
+        return validation_loss,training_loss,anything
